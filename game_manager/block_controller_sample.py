@@ -14,6 +14,14 @@ class Block_Controller(object):
     ShapeNone_index = 0
     CurrentShape_class = 0
     NextShape_class = 0
+    HoldShape_class = 0
+    NNextShape_class = 0
+
+    hold_flg = 0
+    hold_flg2 = 0
+    hold_flg3 = 0
+    hold_first_error_avoid_flg = 0
+    pre_isolatedblocks = 0
 
     # GetNextMove is main function.
     # input
@@ -37,6 +45,12 @@ class Block_Controller(object):
         # next shape info
         NextShapeDirectionRange = GameStatus["block_info"]["nextShape"]["direction_range"]
         self.NextShape_class = GameStatus["block_info"]["nextShape"]["class"]
+        # hold shape info
+        HoldShapeDirectionRange = GameStatus["block_info"]["holdShape"]["direction_range"]
+        self.HoldShape_class = GameStatus["block_info"]["holdShape"]["class"]
+        # Next Next shape info
+        NNextShapeDirectionRange = GameStatus["block_info"]["nextShapeList"]["element0"]["direction_range"]
+        self.NNextShape_class = GameStatus["block_info"]["nextShapeList"]["element0"]["class"]
         # current board info
         self.board_backboard = GameStatus["field_info"]["backboard"]
         # default board definition
@@ -44,42 +58,161 @@ class Block_Controller(object):
         self.board_data_height = GameStatus["field_info"]["height"]
         self.ShapeNone_index = GameStatus["debug_info"]["shape_info"]["shapeNone"]["index"]
 
+        game_time = GameStatus["judge_info"]["elapsed_time"]
+
         # search best nextMove -->
-        strategy = None
+        #全探索は時間がかかりすぎる、次のブロックとかを計算しようとすると
+        strategy = None # 全探索
         LatestEvalValue = -100000
+
+        tmp_isolatedblocks = 0
+
+        if (self.hold_flg == 0) and (self.hold_flg2 == 0):
+            for direction1 in NextShapeDirectionRange:
+                x1Min, x1Max = self.getSearchXRange(self.NextShape_class, direction1)
+                for x1 in range(x1Min, x1Max):
+                    board2 = self.getBoard(self.board_backboard, self.NextShape_class, direction1, x1)
+                    EvalValue_1, tmp_isolatedblocks = self.calcEvaluationValueSample(board2, self.pre_isolatedblocks, self.NextShape_class, game_time)
+                    for direction0 in CurrentShapeDirectionRange: # 4通りの回転
+                        # search with x range
+                        x0Min, x0Max = self.getSearchXRange(self.CurrentShape_class, direction0)
+                        for x0 in range(x0Min, x0Max): # x軸9個のどこにおけばいいのか
+                            # get board data, as if dropdown block
+                            board = self.getBoard(board2, self.CurrentShape_class, direction0, x0)
+                            # evaluate board
+                            EvalValue_2, tmp_isolatedblocks = self.calcEvaluationValueSample(board, self.pre_isolatedblocks, self.CurrentShape_class, game_time) # 盤面の評価
+                            EvalValue = EvalValue_1 + EvalValue_2
+                            if EvalValue > LatestEvalValue:
+                                strategy = (direction1, x1, 1, 1, tmp_isolatedblocks)
+                                LatestEvalValue = EvalValue
+                                self.hold_flg = 1
+
         # search with current block Shape
-        for direction0 in CurrentShapeDirectionRange:
-            # search with x range
-            x0Min, x0Max = self.getSearchXRange(self.CurrentShape_class, direction0)
-            for x0 in range(x0Min, x0Max):
-                # get board data, as if dropdown block
-                board = self.getBoard(self.board_backboard, self.CurrentShape_class, direction0, x0)
+        if (self.hold_flg == 0) and (self.hold_flg2 == 0):
+            for direction0 in CurrentShapeDirectionRange: # 4通りの回転
+                # search with x range
+                x0Min, x0Max = self.getSearchXRange(self.CurrentShape_class, direction0)
+                for x0 in range(x0Min, x0Max): # x軸9個のどこにおけばいいのか
+                    # get board data, as if dropdown block
+                    board = self.getBoard(self.board_backboard, self.CurrentShape_class, direction0, x0)
+                    # evaluate board
+                    EvalValue_1, tmp_isolatedblocks = self.calcEvaluationValueSample(board, self.pre_isolatedblocks, self.CurrentShape_class, game_time) # 盤面の評価
+                    # holdするか否かの評価は入っていない
+                    # update best move
+                    for direction1 in NextShapeDirectionRange:
+                        x1Min, x1Max = self.getSearchXRange(self.NextShape_class, direction1)
+                        for x1 in range(x1Min, x1Max):
+                            board2 = self.getBoard(board, self.NextShape_class, direction1, x1)
+                            EvalValue_2, tmp_isolatedblocks = self.calcEvaluationValueSample(board2, self.pre_isolatedblocks, self.NextShape_class, game_time)
+                            EvalValue = EvalValue_1 + EvalValue_2
+                            if EvalValue > LatestEvalValue:
+                                strategy = (direction0, x0, 1, 1, tmp_isolatedblocks) # 一番よかった方向と位置を覚える
+                                LatestEvalValue = EvalValue
+                                self.hold_flg = 0
+                                nextMove["strategy"]["use_hold_function"] = "n"
 
-                # evaluate board
-                EvalValue = self.calcEvaluationValueSample(board)
-                # update best move
-                if EvalValue > LatestEvalValue:
-                    strategy = (direction0, x0, 1, 1)
-                    LatestEvalValue = EvalValue
-
-                ###test
-                ###for direction1 in NextShapeDirectionRange:
-                ###  x1Min, x1Max = self.getSearchXRange(self.NextShape_class, direction1)
-                ###  for x1 in range(x1Min, x1Max):
-                ###        board2 = self.getBoard(board, self.NextShape_class, direction1, x1)
-                ###        EvalValue = self.calcEvaluationValueSample(board2)
-                ###        if EvalValue > LatestEvalValue:
-                ###            strategy = (direction0, x0, 1, 1)
-                ###            LatestEvalValue = EvalValue
         # search best nextMove <--
+
+        if (self.hold_flg == 1) and (self.hold_flg2 == 0):
+            self.hold_first_error_avoid_flg = 1
+            self.hold_flg2 = 1
+            nextMove["strategy"]["use_hold_function"] = "y"
+
+        if (self.hold_flg == 1) and (self.hold_flg2 == 1) and (self.hold_first_error_avoid_flg == 0):
+            for direction2 in HoldShapeDirectionRange:
+                x2Min, x2Max = self.getSearchXRange(self.HoldShape_class, direction2)
+                for x2 in range(x2Min, x2Max):
+                    board3 = self.getBoard(self.board_backboard, self.HoldShape_class, direction2, x2)
+                    EvalValue_1, tmp_isolatedblocks = self.calcEvaluationValueSample(board3, self.pre_isolatedblocks, self.HoldShape_class, game_time)
+                    for direction0 in CurrentShapeDirectionRange: # 4通りの回転
+                        # search with x range
+                        x0Min, x0Max = self.getSearchXRange(self.CurrentShape_class, direction0)
+                        for x0 in range(x0Min, x0Max): # x軸9個のどこにおけばいいのか
+                            # get board data, as if dropdown block
+                            board = self.getBoard(board3, self.CurrentShape_class, direction0, x0)
+                            # evaluate board
+                            EvalValue_2, tmp_isolatedblocks = self.calcEvaluationValueSample(board, self.pre_isolatedblocks, self.CurrentShape_class, game_time) # 盤面の評価
+                            EvalValue = EvalValue_1 + EvalValue_2
+                            if EvalValue > LatestEvalValue:
+                                strategy = (direction2, x2, 1, 1, tmp_isolatedblocks)
+                                LatestEvalValue = EvalValue
+                                self.hold_flg3 = 1
+
+        if (self.hold_flg == 1) and (self.hold_flg2 == 1) and (self.hold_first_error_avoid_flg == 0):
+            for direction2 in HoldShapeDirectionRange:
+                x2Min, x2Max = self.getSearchXRange(self.HoldShape_class, direction2)
+                for x2 in range(x2Min, x2Max):
+                    board3 = self.getBoard(self.board_backboard, self.HoldShape_class, direction2, x2)
+                    EvalValue_1, tmp_isolatedblocks = self.calcEvaluationValueSample(board3, self.pre_isolatedblocks, self.HoldShape_class, game_time)
+                    for direction1 in NextShapeDirectionRange:
+                        x1Min, x1Max = self.getSearchXRange(self.NextShape_class, direction1)
+                        for x1 in range(x1Min, x1Max):
+                            board2 = self.getBoard(board3, self.NextShape_class, direction1, x1)
+                            EvalValue_2, tmp_isolatedblocks = self.calcEvaluationValueSample(board2, self.pre_isolatedblocks, self.NextShape_class, game_time)
+                            EvalValue = EvalValue_1 + EvalValue_2
+                            if EvalValue > LatestEvalValue:
+                                strategy = (direction2, x2, 1, 1, tmp_isolatedblocks) # 一番よかった方向と位置を覚える
+                                LatestEvalValue = EvalValue
+                                self.hold_flg3 = 1
+
+        if (self.hold_flg == 1) and (self.hold_flg2 == 1) and (self.hold_first_error_avoid_flg == 0):
+            for direction0 in CurrentShapeDirectionRange: # 4通りの回転
+                # search with x range
+                x0Min, x0Max = self.getSearchXRange(self.CurrentShape_class, direction0)
+                for x0 in range(x0Min, x0Max): # x軸9個のどこにおけばいいのか
+                    # get board data, as if dropdown block
+                    board = self.getBoard(self.board_backboard, self.CurrentShape_class, direction0, x0)
+                    # evaluate board
+                    EvalValue_1, tmp_isolatedblocks = self.calcEvaluationValueSample(board, self.pre_isolatedblocks, self.CurrentShape_class, game_time) # 盤面の評価
+                    for direction1 in NextShapeDirectionRange:
+                        x1Min, x1Max = self.getSearchXRange(self.NextShape_class, direction1)
+                        for x1 in range(x1Min, x1Max):
+                            board2 = self.getBoard(board, self.NextShape_class, direction1, x1)
+                            EvalValue_2, tmp_isolatedblocks = self.calcEvaluationValueSample(board2, self.pre_isolatedblocks, self.NextShape_class, game_time)
+                            EvalValue = EvalValue_1 + EvalValue_2
+                            if EvalValue > LatestEvalValue:
+                                strategy = (direction0, x0, 1, 1, tmp_isolatedblocks) # 一番よかった方向と位置を覚える
+                                LatestEvalValue = EvalValue
+                                self.hold_flg3 = 0
+                                nextMove["strategy"]["use_hold_function"] = "n"
+        
+        if (self.hold_flg == 1) and (self.hold_flg2 == 1) and (self.hold_first_error_avoid_flg == 0):
+            for direction0 in CurrentShapeDirectionRange: # 4通りの回転
+                # search with x range
+                x0Min, x0Max = self.getSearchXRange(self.CurrentShape_class, direction0)
+                for x0 in range(x0Min, x0Max): # x軸9個のどこにおけばいいのか
+                    # get board data, as if dropdown block
+                    board = self.getBoard(self.board_backboard, self.CurrentShape_class, direction0, x0)
+                    # evaluate board
+                    EvalValue_1, tmp_isolatedblocks = self.calcEvaluationValueSample(board, self.pre_isolatedblocks, self.CurrentShape_class, game_time) # 盤面の評価
+                    for direction2 in HoldShapeDirectionRange:
+                        x2Min, x2Max = self.getSearchXRange(self.HoldShape_class, direction2)
+                        for x2 in range(x2Min, x2Max):
+                            board3 = self.getBoard(board, self.HoldShape_class, direction2, x2)
+                            EvalValue_2, tmp_isolatedblocks = self.calcEvaluationValueSample(board3, self.pre_isolatedblocks, self.HoldShape_class, game_time)
+                            EvalValue = EvalValue_1 + EvalValue_2
+                            if EvalValue > LatestEvalValue:
+                                strategy = (direction0, x0, 1, 1, tmp_isolatedblocks) # 一番よかった方向と位置を覚える
+                                LatestEvalValue = EvalValue
+                                self.hold_flg3 = 0
+                                nextMove["strategy"]["use_hold_function"] = "n"
+
+        if (self.hold_flg3 == 1):
+            nextMove["strategy"]["use_hold_function"] = "y"
 
         print("===", datetime.now() - t1)
         nextMove["strategy"]["direction"] = strategy[0]
         nextMove["strategy"]["x"] = strategy[1]
         nextMove["strategy"]["y_operation"] = strategy[2]
         nextMove["strategy"]["y_moveblocknum"] = strategy[3]
+        self.pre_isolatedblocks = strategy[4]
         print(nextMove)
+        print(self.hold_flg, self.hold_flg2, self.hold_flg3, self.hold_first_error_avoid_flg, self.pre_isolatedblocks, self.CurrentShape_class.shape, game_time)
         print("###### SAMPLE CODE ######")
+
+        self.hold_flg3 = 0
+        self.hold_first_error_avoid_flg = 0
+
         return nextMove
 
     def getSearchXRange(self, Shape_class, direction):
@@ -137,7 +270,7 @@ class Block_Controller(object):
             _board[(_y + dy) * self.board_data_width + _x] = Shape_class.shape
         return _board
 
-    def calcEvaluationValueSample(self, board):
+    def calcEvaluationValueSample(self, board, pre_isolatedblocks, Shape_class, elapsed_time):
         #
         # sample function of evaluate board.
         #
@@ -155,6 +288,26 @@ class Block_Controller(object):
         BlockMaxY = [0] * width
         holeCandidates = [0] * width
         holeConfirm = [0] * width
+        hole_max_height = [0] * width
+
+        x_isolatedblock = 0
+
+        fullLines_para = 1.5
+        nHoles_para = 150.0
+        nIsolatedBlocks_para = 150.0
+        absDy_para = 50.0
+        hole_max_height_para = 5.0
+        max_height_para = 5.0
+
+        score = 0
+
+        x_0_block_flgs = 0
+
+        # if pre_isolatedblocks > 0:
+        #     fullLines_para = 5.0
+        #     nHoles_para = 10.0
+        #     nIsolatedBlocks_para = 50.0
+        #     absDy_para = 10.0
 
         ### check board
         # each y line
@@ -170,6 +323,8 @@ class Block_Controller(object):
                     holeCandidates[x] += 1  # just candidates in each column..
                 else:
                     # block
+                    if x == 0:
+                        x_0_block_flgs += 1
                     hasBlock = True
                     BlockMaxY[x] = height - y                # update blockMaxY
                     if holeCandidates[x] > 0:
@@ -177,10 +332,15 @@ class Block_Controller(object):
                         holeCandidates[x] = 0                # reset
                     if holeConfirm[x] > 0:
                         nIsolatedBlocks += 1                 # update number of isolated blocks
+                        hole_max_height[x] = BlockMaxY[x]
+                        x_isolatedblock += 1
 
             if hasBlock == True and hasHole == False:
                 # filled with block
                 fullLines += 1
+                if x_isolatedblock > 0:
+                    nIsolatedBlocks -= x_isolatedblock
+                    x_isolatedblock = 0
             elif hasBlock == True and hasHole == True:
                 # do nothing
                 pass
@@ -201,9 +361,13 @@ class Block_Controller(object):
             absDy += abs(x)
 
         #### maxDy
-        #maxDy = max(BlockMaxY) - min(BlockMaxY)
+        # new_ls = set(BlockMaxY)
+        # new_ls.remove(min(new_ls))
+        # result = min(new_ls)
+        # maxDy = max(BlockMaxY) - result
+        # maxDy = max(BlockMaxY) - min(BlockMaxY)
         #### maxHeight
-        #maxHeight = max(BlockMaxY) - fullLines
+        maxHeight = max(BlockMaxY) - fullLines
 
         ## statistical data
         #### stdY
@@ -217,20 +381,57 @@ class Block_Controller(object):
         #else:
         #    stdDY = math.sqrt(sum([y ** 2 for y in BlockMaxDy]) / len(BlockMaxDy) - (sum(BlockMaxDy) / len(BlockMaxDy)) ** 2)
 
+        # if maxHeight > 11:
+        #     absDy_para = 50.0
+        #     max_height_para = 50.0
+
+        if Shape_class.shape == 1 and fullLines <= 2 and elapsed_time < 170 and maxHeight < 15:
+            score -= 1000
+
+        if Shape_class.shape == 1 and fullLines > 2 and elapsed_time < 170:
+            fullLines_para = 250.0
+            if fullLines > 3:
+                score += 3000
+                fullLines_para = 500.0
+
+        if fullLines < 2 and elapsed_time < 170:
+            fullLines_para = 0.5
+
+        # if maxHeight <= 10:
+        #     absDy_para = 100.0
+
+        if maxHeight < 12 and x_0_block_flgs >= 1 and elapsed_time < 170:
+            score -= 500
+
+        if elapsed_time >= 170:
+            fullLines_para = 100.0
+
+        if maxHeight > 18:
+            fullLines_para = 50.0
+
+        # if nIsolatedBlocks >= 3:
+        #     fullLines_para = 100.0
+        #     nHoles_para = 0.0
+        #     nIsolatedBlocks_para = 50.0
+        #     absDy_para = 50.0
+
+        # if maxDy > 5:
+        #     score -= 1000
 
         # calc Evaluation Value
-        score = 0
-        score = score + fullLines * 10.0           # try to delete line 
-        score = score - nHoles * 1.0               # try not to make hole
-        score = score - nIsolatedBlocks * 1.0      # try not to make isolated block
-        score = score - absDy * 1.0                # try to put block smoothly
+        score = score + fullLines * fullLines_para           # try to delete line
+        score = score - nHoles * nHoles_para               # try not to make hole
+        score = score - nIsolatedBlocks * nIsolatedBlocks_para      # try not to make isolated block
+        # for hole_max_height_column in hole_max_height:
+        #     score = score - hole_max_height_column * hole_max_height_para
+        score = score - absDy * absDy_para                # try to put block smoothly # yの絶対値を少なくする、ボコボコにしない
         #score = score - maxDy * 0.3                # maxDy
-        #score = score - maxHeight * 5              # maxHeight
+        # score = score - maxHeight * max_height_para              # maxHeight
         #score = score - stdY * 1.0                 # statistical data
         #score = score - stdDY * 0.01               # statistical data
 
         # print(score, fullLines, nHoles, nIsolatedBlocks, maxHeight, stdY, stdDY, absDy, BlockMaxY)
-        return score
+        return score, nIsolatedBlocks
 
 
 BLOCK_CONTROLLER_SAMPLE = Block_Controller()
