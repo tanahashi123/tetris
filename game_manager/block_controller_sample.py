@@ -66,7 +66,7 @@ class Block_Controller(object):
         LatestEvalValue = -100000
 
         tmp_isolatedblocks = 0
-
+        # next->current->nnext
         if (self.hold_flg == 0) and (self.hold_flg2 == 0):
             for direction1 in NextShapeDirectionRange:
                 x1Min, x1Max = self.getSearchXRange(self.NextShape_class, direction1)
@@ -87,7 +87,7 @@ class Block_Controller(object):
                                 LatestEvalValue = EvalValue
                                 self.hold_flg = 1
 
-        # search with current block Shape
+        # current->next->nnext
         if (self.hold_flg == 0) and (self.hold_flg2 == 0):
             for direction0 in CurrentShapeDirectionRange: # 4通りの回転
                 # search with x range
@@ -110,8 +110,6 @@ class Block_Controller(object):
                                 LatestEvalValue = EvalValue
                                 self.hold_flg = 0
                                 nextMove["strategy"]["use_hold_function"] = "n"
-
-        # search best nextMove <--
 
         if (self.hold_flg == 1) and (self.hold_flg2 == 0):
             self.hold_first_error_avoid_flg = 1
@@ -295,13 +293,14 @@ class Block_Controller(object):
         fullLines_para = 1.5
         nHoles_para = 150.0
         nIsolatedBlocks_para = 150.0
-        absDy_para = 50.0
+        absDy_para = 100.0
         hole_max_height_para = 5.0
         max_height_para = 5.0
 
         score = 0
 
         x_0_block_flgs = 0
+        x_1_block_flgs = 0
 
         # if pre_isolatedblocks > 0:
         #     fullLines_para = 5.0
@@ -325,6 +324,8 @@ class Block_Controller(object):
                     # block
                     if x == 0:
                         x_0_block_flgs += 1
+                    if x == 1:
+                        x_1_block_flgs += 1
                     hasBlock = True
                     BlockMaxY[x] = height - y                # update blockMaxY
                     if holeCandidates[x] > 0:
@@ -385,35 +386,34 @@ class Block_Controller(object):
         #     absDy_para = 50.0
         #     max_height_para = 50.0
 
-        if Shape_class.shape == 1 and fullLines <= 2 and elapsed_time < 170 and maxHeight < 15:
+        if Shape_class.shape == 1 and fullLines <= 2 and elapsed_time < 175 and maxHeight < 15:
             score -= 1000
 
-        if Shape_class.shape == 1 and fullLines > 2 and elapsed_time < 170:
-            fullLines_para = 250.0
+        if Shape_class.shape == 1 and fullLines > 2 and elapsed_time < 175:
+            fullLines_para = 1.5
             if fullLines > 3:
                 score += 3000
                 fullLines_para = 500.0
 
-        if fullLines < 2 and elapsed_time < 170:
+        if fullLines < 2 and elapsed_time < 175:
             fullLines_para = 0.5
 
         # if maxHeight <= 10:
         #     absDy_para = 100.0
 
-        if maxHeight < 12 and x_0_block_flgs >= 1 and elapsed_time < 170:
-            score -= 500
+        if maxHeight < 12 and x_0_block_flgs >= 1 and elapsed_time < 175 and Shape_class.shape != 1:
+            # score -= 500
+            score -= x_0_block_flgs * 300
 
-        if elapsed_time >= 170:
+        if elapsed_time >= 175:
             fullLines_para = 100.0
 
         if maxHeight > 18:
             fullLines_para = 50.0
 
-        # if nIsolatedBlocks >= 3:
-        #     fullLines_para = 100.0
-        #     nHoles_para = 0.0
-        #     nIsolatedBlocks_para = 50.0
-        #     absDy_para = 50.0
+        if pre_isolatedblocks >= 1:
+            nHoles_para = 500.0
+            nIsolatedBlocks_para = 500.0
 
         # if maxDy > 5:
         #     score -= 1000
